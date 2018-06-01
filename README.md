@@ -17,11 +17,11 @@ In the future Watchdog4Git could also check for [Git Submodule](https://git-scm.
 make deps
 make
 ```
-3. Deploy the `watchdog4git` executable to your [webhook server](https://help.github.com/articles/about-webhooks/). 
-2. Define the `GITHUB_TOKEN` environment variable with a [GitHub token](https://help.github.com/articles/creating-a-personal-access-token-for-the-command-line/) that has read access permissions to your repositories.
-3. Run Watchdog4Git on the server.
-4. Add a webhook to your repository or organization and point it to your server. Choose `application/json` as the request type and choose only the `push` event.
-5. Add a `.github/watchdog.yml` file to your repository that configures the Git LFS checks:
+2. Deploy the `watchdog4git` executable to your [webhook server](https://help.github.com/articles/about-webhooks/). 
+3. Define the `GITHUB_TOKEN` environment variable with a [GitHub token](https://help.github.com/articles/creating-a-personal-access-token-for-the-command-line/) that is able to create commit comments on your repositories ('repo' scope).
+4. Run Watchdog4Git on the server.
+5. Add a webhook to your repository or organization and point it to your server. Choose `application/json` as the request type and choose only the `push` event.
+6. Add a `.github/watchdog.yml` file to your repository that configures the Git LFS checks:
 
 ```
 # Contact for users in notification comments (can include GitHub @mentions)
@@ -31,7 +31,7 @@ helpContact: "[#your-channel](https://yourcompany.slack.com/messages/ABC1234)"
 # (uncompressed size in bytes)
 lfsSizeThreshold: 512000
 
-# List of files that except from the general size threshold
+# List of files that are exempt from the general size threshold
 # (typically large text files, optional)
 lfsSizeExemptions: |
     testdata/largetext.txt
@@ -45,15 +45,15 @@ lfsSizeExemptionsThreshold: 20000000
 lfsSuggestionsEnabled: Yes
 ```
 
-In the future we plan to release Watchdog4Git as [GitHub App](https://github.com/marketplace) to ease the setup. 
+In the future we plan to release Watchdog4Git as a [GitHub App](https://github.com/marketplace) to ease the setup. 
 
 ### How does it work?
 
 Watchdog4Git receives GitHub [webhook](https://developer.github.com/webhooks/) events for every push. The payload contains a list of commits whose metadata contain the list of added, modified, and deleted files.
 
 Before examining the pushed commits, Watch4Dog downloads and parses the `.gitattributes` file from the default branch to learn what files are currently tracked by Git LFS. For each added or modified file in each commit, the bot [queries the file size](https://developer.github.com/v3/repos/contents/) and checks:
-- If the file matches the Git LFS path pattern but has no valid Git LFS pointer content, then the file is marked as *misconfiguration*.
-- If the file does not match a Git LFS path pattern but is greater than the defined threshold, then the file is marked as *suggestion*.
+- If the file matches the Git LFS path pattern but has no valid Git LFS pointer content, then the file is marked as a *misconfiguration*.
+- If the file does not match a Git LFS path pattern but is larger than the defined threshold, then the file is marked as a *suggestion*.
 Finally, all misconfigurations and suggestions are rolled up in a single commit comment.
 
 ### Contributors
@@ -66,4 +66,3 @@ These are the humans that develop Watchdog4Git:
 ## License
 
 SPDX-License-Identifier: [MIT](LICENSE.md)
-
