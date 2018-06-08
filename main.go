@@ -8,7 +8,7 @@ import (
 	webhooks "gopkg.in/go-playground/webhooks.v3"
 	receiver "gopkg.in/go-playground/webhooks.v3/github"
 
-	"github.com/autodesk/watchdog4git/watchdog"
+	"github.com/Autodesk/watchdog4git/watchdog"
 )
 
 const (
