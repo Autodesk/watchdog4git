@@ -21,7 +21,7 @@ import (
 	receiver "gopkg.in/go-playground/webhooks.v3/github"
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/autodesk/watchdog4git/attributes"
+	"github.com/Autodesk/watchdog4git/attributes"
 )
 
 const (
