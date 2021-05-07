@@ -1,7 +1,6 @@
 package watchdog
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -11,10 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	github "github.com/google/go-github/github"
-	"github.com/gregjones/httpcache"
+	"github.com/google/go-github/v35/github"
 	"github.com/stretchr/testify/assert"
-	receiver "gopkg.in/go-playground/webhooks.v3/github"
 )
 
 // Setup a HTTP test server to serve mocked API responses.
@@ -30,37 +27,11 @@ func teardown(server *httptest.Server) {
 }
 
 func newWatchDog(url string) *WatchDog {
-	pushPayload := &receiver.PushPayload{}
-	pushPayload.Repository.URL = url
-	pushPayload.Repository.FullName = "testorg/testrepo"
-	pushPayload.Repository.Name = "testrepo"
-	pushPayload.Repository.Owner.Name = "testorg"
-	w, _ := New(pushPayload, "abc123")
+	http := http.DefaultClient
+	client, _ := github.NewEnterpriseClient(url, url, http)
+	w := New(client)
 	return w
 }
-
-func TestSetGitHubAPIURL(t *testing.T) {
-	cases := []struct {
-		in  string
-		out string
-	}{
-		{
-			in:  "https://github.com/baxterthehacker/public-repo",
-			out: "https://api.github.com/",
-		},
-		{
-			in:  "https://ghe.company.com/baxterthehacker/public-repo",
-			out: "https://ghe.company.com/api/v3/",
-		},
-	}
-
-	for _, c := range cases {
-		w := newWatchDog(c.in)
-		w.setGitHubAPIURL()
-		assert.Equal(t, w.Client.BaseURL.String(), c.out)
-	}
-}
-
 func TestGetFile(t *testing.T) {
 	mux, server := setup()
 	defer teardown(server)
@@ -77,51 +48,15 @@ func TestGetFile(t *testing.T) {
 		"content": "c29tZXRoaW5nIGVsc2U="
 	  }
 	`
-	endpoint := fmt.Sprintf("/api/v3/repos/%s/contents/%s", w.fullName(), path)
+	endpoint := fmt.Sprintf("/api/v3/repos/%s/contents/%s", "test-org/test-repo", path)
 	mux.HandleFunc(endpoint,
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "%s", payload)
+		func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(rw, "%s", payload)
 		},
 	)
-	retrieved, err := w.getFileContent("abc123", path)
+	retrieved, err := w.getFileContent("test-org", "test-repo", "abc123", path)
 	assert.Nil(t, err)
 	assert.Equal(t, "something else", retrieved)
-}
-
-func TestHTTPCache(t *testing.T) {
-	mux, server := setup()
-	defer teardown(server)
-	w := newWatchDog(server.URL)
-
-	path := "README.md"
-	payload := `{ "name": "README.md" }`
-
-	endpoint := fmt.Sprintf("/api/v3/repos/%s/contents/%s", w.fullName(), path)
-	requestCount := 0
-	mux.HandleFunc(endpoint,
-		func(w http.ResponseWriter, r *http.Request) {
-			requestCount++
-			// Cache header as defined by GitHub Enterprise
-			w.Header().Set("Last-Modified", "Fri, 14 Dec 2010 01:01:50 GMT")
-			w.Header().Set("Cache-Control", "private, max-age=60, s-maxage=60")
-			fmt.Fprintf(w, "%s", payload)
-		},
-	)
-
-	_, _, resp, err := w.Client.Repositories.GetContents(
-		context.Background(), w.org(), w.repo(), path,
-		&github.RepositoryContentGetOptions{})
-	assert.Nil(t, err)
-	assert.Equal(t, requestCount, 1)
-	_, exists := resp.Header[httpcache.XFromCache]
-	assert.False(t, exists, "first request should not have a cache header")
-
-	_, _, resp, err = w.Client.Repositories.GetContents(
-		context.Background(), w.org(), w.repo(), path, &github.RepositoryContentGetOptions{})
-	assert.Nil(t, err)
-	assert.Equal(t, requestCount, 1, "second request should be cached")
-	_, exists = resp.Header[httpcache.XFromCache]
-	assert.True(t, exists, "second request should have a cache header")
 }
 
 func TestGetDirContent(t *testing.T) {
@@ -133,17 +68,17 @@ func TestGetDirContent(t *testing.T) {
 	payload := `[{ "name": "file1" }, { "name": "file2" }]`
 	endpoint := fmt.Sprintf(
 		"/api/v3/repos/%s/contents/%s/",
-		w.Repository.FullName,
+		"test-org/test-repo",
 		filepath.Dir(path),
 	)
 
 	mux.HandleFunc(endpoint,
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "%s", payload)
+		func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(rw, "%s", payload)
 		},
 	)
 
-	dir, err := w.getDirContent("abc123", path)
+	dir, err := w.getDirContent("test-org", "test-repo", "abc123", path)
 	assert.Nil(t, err)
 	assert.Equal(t, 2, len(dir))
 	assert.Equal(t, *dir[0].Name, "file1")
@@ -155,35 +90,35 @@ func TestGetFileSize(t *testing.T) {
 	defer teardown(server)
 	w := newWatchDog(server.URL)
 
-	path := "some/path"
+	path := "some/path/bogus-basename"
 	payload := `[{ "type": "file", "size": 5, "name": "file1", "path": "some/path/file1" }, { "type": "symlink", "size": 6, "name": "file2", "path": "some/path/file2" }]`
 	endpoint := fmt.Sprintf(
 		"/api/v3/repos/%s/contents/%s/",
-		w.Repository.FullName,
+		"test-org/test-repo",
 		filepath.Dir(path),
 	)
 
 	mux.HandleFunc(endpoint,
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "%s", payload)
+		func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(rw, "%s", payload)
 		},
 	)
 
-	size, err := w.getFileSize("abc123", "some/path/file1")
+	size, err := w.getFileSize("test-org", "test-repo", "abc123", "some/path/file1")
 	assert.Nil(t, err)
 	assert.Equal(t, 5, size)
-	size, err = w.getFileSize("abc123", "some/path/file2")
+	_, err = w.getFileSize("test-org", "test-repo", "abc123", "some/path/file2")
 	assert.NotNil(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), "error: 'name 'some/path/file2' matches, but object is a symlink'"))
+	assert.True(t, strings.HasPrefix(err.Error(), "for file 'some/path/file2' at ref 'abc123', name 'some/path/file2' matches, but object is a symlink"))
 }
+
 func TestCommentAll(t *testing.T) {
 	w := newWatchDog("http://testserver.com")
 
 	comment, err := w.createComment(
-		[]string{"pointer/without/content/1", "pointer/without/content/2"},
+		"test-org/test-repo",
 		[]string{"path/to/large/file1", "other/path/to/large/file2"},
-		"[#tech-git](https://company.slack.com/messages/123)",
-		512000,
+		"[#tech-git](https://autodesk.slack.com/messages/C0E0BH9T5)",
 	)
 	assert.Nil(t, err)
 	assert.Equal(t, strings.Replace(
@@ -191,11 +126,7 @@ func TestCommentAll(t *testing.T) {
 		- path/to/large/file1
 		- other/path/to/large/file2
 
-		**:warning: The following files have not been properly added to [Git LFS](https://git-lfs.github.com/):**
-		- pointer/without/content/1
-		- pointer/without/content/2
-
-		> Watch the [Git LFS tutorial](https://www.youtube.com/watch?v=YQzNfb4IwEY) or contact [#tech-git](https://company.slack.com/messages/123) for help.`, "\t", "", -1),
+		> Watch the [Git LFS tutorial](https://www.youtube.com/watch?v=YQzNfb4IwEY) or contact [#tech-git](https://autodesk.slack.com/messages/C0E0BH9T5) for help.`, "\t", "", -1),
 		comment,
 	)
 }
@@ -204,10 +135,9 @@ func TestCommentLargeFiles(t *testing.T) {
 	w := newWatchDog("http://testserver.com")
 
 	comment, err := w.createComment(
-		nil,
+		"test-org/test-repo",
 		[]string{"path/to/large/file1", "other/path/to/large/file2"},
 		"someone@somecompany.com",
-		512000,
 	)
 	assert.Nil(t, err)
 	assert.Equal(t, strings.Replace(
@@ -219,116 +149,30 @@ func TestCommentLargeFiles(t *testing.T) {
 		comment,
 	)
 }
-
-func TestCommentInvalidPointer(t *testing.T) {
-	w := newWatchDog("http://testserver.com")
-
-	comment, err := w.createComment(
-		[]string{"pointer/without/content/1", "pointer/without/content/2"},
-		nil,
-		"[#tech-git](https://company.slack.com/messages/123)",
-		100000,
-	)
-	assert.Nil(t, err)
-	assert.Equal(t, strings.Replace(
-		`**:warning: The following files have not been properly added to [Git LFS](https://git-lfs.github.com/):**
-		- pointer/without/content/1
-		- pointer/without/content/2
-
-		> Watch the [Git LFS tutorial](https://www.youtube.com/watch?v=YQzNfb4IwEY) or contact [#tech-git](https://company.slack.com/messages/123) for help.`, "\t", "", -1),
-		comment,
-	)
-}
 func TestPostComment(t *testing.T) {
 	mux, server := setup()
 	defer teardown(server)
 	w := newWatchDog(server.URL)
 	sha := "123abc"
 
-	endpoint := fmt.Sprintf("/api/v3/repos/%s/commits/%s/comments", w.Repository.FullName, sha)
+	endpoint := fmt.Sprintf("/api/v3/repos/%s/commits/%s/comments", "test-org/test-repo", sha)
 
 	mux.HandleFunc(endpoint,
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, "")
+		func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(rw, "")
 		},
 	)
 
-	misses := []string{"something/that/should/be/a/pointer", "badpointer"}
 	suggestions := []string{"a/large/file", "largish"}
-	comment, err := w.createComment(misses, suggestions, "@someone", 200)
+	comment, err := w.createComment("test-org/test-repo", suggestions, "@someone")
 	assert.Nil(t, err)
-	err = w.postComment(sha, &comment)
-	assert.Nil(t, err)
-}
-
-func TestInvalidLFSPointerSize(t *testing.T) {
-	w := newWatchDog("http://testserver.com")
-	err := w.validateLFSPointer("abc123", "some/big/pointer", 10)
-	assert.Equal(t, errLFSPointer, err)
-	err = w.validateLFSPointer("abc123", "some/big/pointer", 9999)
-	assert.Equal(t, errLFSPointer, err)
-}
-
-func TestLFSPointerBlobDownloadError(t *testing.T) {
-	_, server := setup()
-	defer teardown(server)
-	w := newWatchDog(server.URL)
-	// Since we did not configure any mock, we cannot retrieve content
-	err := w.validateLFSPointer("abc123", "some/pointer", 140)
-	assert.IsType(t, &github.ErrorResponse{}, err)
-}
-
-func TestInvalidLFSPointer(t *testing.T) {
-	mux, server := setup()
-	defer teardown(server)
-	w := newWatchDog(server.URL)
-
-	mux.HandleFunc("/api/v3/repos/testorg/testrepo/contents/path/to/some/pointer",
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, `
-				{
-					"name": "pointer",
-					"path": "path/to/some/pointer",
-					"sha": "abc456",
-					"size": 18,
-					"type": "file",
-					"content": "YSBiYWQgbGZzIHBvaW50ZXI=",
-					"encoding": "base64"
-				}`)
-		})
-
-	err := w.validateLFSPointer("abc456", "path/to/some/pointer", 140)
-	assert.Equal(t, err, errLFSPointer)
-}
-
-func TestValidLFSPointer(t *testing.T) {
-	mux, server := setup()
-	defer teardown(server)
-	w := newWatchDog(server.URL)
-
-	mux.HandleFunc("/api/v3/repos/testorg/testrepo/contents/path/to/some/pointer",
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, `
-				{
-					"name": "pointer",
-					"path": "path/to/some/pointer",
-					"sha": "abc456",
-					"size": 5902,
-					"type": "file",
-					"content": "dmVyc2lvbiBodHRwczovL2dpdC1sZnMuZ2l0aHViLmNvbS9zcGVjL3YxCm9p\nZCBzaGEyNTY6ZjA5NmY4MzJmMTYwNGI4ZWYwMmJiYTg1ZDIzZDQ1Y2JkOTE0\nNGEzMjkzNmMyNzYxYzMyNzc1ZmFiN2IxMDAxZQpzaXplIDU5MDIK\n",
-					"encoding": "base64"
-				}`)
-		})
-
-	err := w.validateLFSPointer("abc456", "path/to/some/pointer", 140)
+	err = w.postComment("test-org", "test-repo", sha, &comment)
 	assert.Nil(t, err)
 }
-
 func TestWatchDogConfigFile(t *testing.T) {
 	mux, server := setup()
 	defer teardown(server)
 	w := newWatchDog(server.URL)
-	lfsHelpContact := "Mr. Watch"
 
 	path := ".github/watchdog.yml"
 	yml := "# Contact used in violation comments\n" +
@@ -343,7 +187,8 @@ func TestWatchDogConfigFile(t *testing.T) {
 		"  SomethingElse.txt\n" +
 		"  Yet/another/SomethingElse.txt\n" +
 		"  *.xml\n\n" +
-		"lfsSuggestionsEnabled: Yes"
+		"lfsSuggestionsEnabled: Yes\n" +
+		"lfsCommitStatusEnabled: Yes\n"
 
 	size := len(yml)
 	contentType := "file"
@@ -365,14 +210,14 @@ func TestWatchDogConfigFile(t *testing.T) {
 	marshalled, err := json.Marshal(rc)
 	assert.Nil(t, err)
 
-	endpoint := fmt.Sprintf("/api/v3/repos/%s/contents/%s", w.fullName(), path)
+	endpoint := fmt.Sprintf("/api/v3/repos/%s/contents/%s", "test-org/test-repo", path)
 	mux.HandleFunc(endpoint,
-		func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "%s", marshalled)
+		func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(rw, "%s", marshalled)
 		},
 	)
 
-	c, err := w.getWatchDogConfig(sha)
+	c, err := w.getWatchDogConfig("test-org", "test-repo", sha)
 	assert.Nil(t, err)
 	assert.Equal(t, 512000, c.LFSSizeThreshold)
 	assert.Equal(t, 20000000, c.LFSSizeExemptionsThreshold)
@@ -381,4 +226,58 @@ func TestWatchDogConfigFile(t *testing.T) {
 	assert.True(t, c.LFSExemptionsFilter.Allows("Regression/Something.txt"))
 	assert.True(t, c.LFSExemptionsFilter.Allows("wildcard.xml"))
 	assert.False(t, c.LFSExemptionsFilter.Allows("Regression/non-existent.txt"))
+	assert.True(t, c.LFSCommitStatusEnabled)
+}
+
+func TestUpdateCommitStatus(t *testing.T) {
+	mux, server := setup()
+	defer teardown(server)
+	w := newWatchDog(server.URL)
+	sha := "6dcb09b5b57875f334f61aebed695e2e4193db5e"
+
+	endpoint := fmt.Sprintf("/api/v3/repos/%s/statuses/%s", "test-org/test-repo", sha)
+
+	reply := `
+	{
+		"url": "https://api.github.com/repos/octocat/Hello-World/statuses/6dcb09b5b57875f334f61aebed695e2e4193db5e",
+		"avatar_url": "https://github.com/images/error/hubot_happy.gif",
+		"id": 1,
+		"node_id": "MDY6U3RhdHVzMQ==",
+		"state": "success",
+		"description": "Build has completed successfully",
+		"target_url": "https://ci.example.com/1000/output",
+		"context": "continuous-integration/jenkins",
+		"created_at": "2012-07-20T01:19:13Z",
+		"updated_at": "2012-07-20T01:19:13Z",
+		"creator": {
+		  "login": "octocat",
+		  "id": 1,
+		  "node_id": "MDQ6VXNlcjE=",
+		  "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+		  "gravatar_id": "",
+		  "url": "https://api.github.com/users/octocat",
+		  "html_url": "https://github.com/octocat",
+		  "followers_url": "https://api.github.com/users/octocat/followers",
+		  "following_url": "https://api.github.com/users/octocat/following{/other_user}",
+		  "gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
+		  "starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
+		  "subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
+		  "organizations_url": "https://api.github.com/users/octocat/orgs",
+		  "repos_url": "https://api.github.com/users/octocat/repos",
+		  "events_url": "https://api.github.com/users/octocat/events{/privacy}",
+		  "received_events_url": "https://api.github.com/users/octocat/received_events",
+		  "type": "User",
+		  "site_admin": false
+		}
+	  }
+	`
+
+	mux.HandleFunc(endpoint,
+		func(rw http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(rw, reply)
+		},
+	)
+
+	err := w.updateCommitStatus("test-org", "test-repo", sha, "success", "Build has completed successfully")
+	assert.Nil(t, err)
 }
