@@ -1,10 +1,10 @@
 ## Watchdog4Git
 
-Watchdog4Git is a bot 🤖 that checks commits pushed to GitHub for common Git problems. If the bot identifies a problem, then it notifies the committer by posting a comment to the commit.
+Watchdog4Git is a bot 🤖 that checks commits pushed to GitHub for common Git problems.
+If the bot identifies a problem, then it notifies the committer by posting a comment to the commit.
 
-Currently Watchdog4Git checks only for [Git LFS](https://git-lfs.github.com/) related problems:
-- The watchdog warns if large files are added to the repository that should be tracked by Git LFS.
-- The watchdog warns if files that are defined as Git LFS files are not committed as Git LFS files (likely because of an invalid local Git LFS setup).
+Currently Watchdog4Git checks only for [Git LFS](https://git-lfs.github.com/) related problems.
+The watchdog warns if large files are added to the repository that should be tracked by Git LFS.
 
 ![Screenshot](docs/suggestion.png)
 
@@ -14,14 +14,12 @@ In the future Watchdog4Git could also check for [Git Submodule](https://git-scm.
 
 1. Build Watchdog4Git:
 ```
-make deps
 make
 ```
-2. Deploy the `watchdog4git` executable to your [webhook server](https://help.github.com/articles/about-webhooks/). 
-3. Define the `GITHUB_TOKEN` environment variable with a [GitHub token](https://help.github.com/articles/creating-a-personal-access-token-for-the-command-line/) that is able to create commit comments on your repositories ('repo' scope).
-4. Run Watchdog4Git on the server.
-5. Add a webhook to your repository or organization and point it to your server. Choose `application/json` as the request type and choose only the `push` event.
-6. Add a `.github/watchdog.yml` file to your repository that configures the Git LFS checks:
+1. Deploy the `watchdog4git` executable to a server.
+1. Run Watchdog4Git on the server.
+1. Create and install a `watchdog4git` GitHub App and point it to your server.
+1. Add a `.github/watchdog.yml` file to your repository that configures the Git LFS checks:
 
 ```
 # Contact for users in notification comments (can include GitHub @mentions)
@@ -45,16 +43,14 @@ lfsSizeExemptionsThreshold: 20000000
 lfsSuggestionsEnabled: Yes
 ```
 
-In the future we plan to release Watchdog4Git as a [GitHub App](https://github.com/marketplace) to ease the setup. 
 
 ### How does it work?
 
-Watchdog4Git receives GitHub [webhook](https://developer.github.com/webhooks/) events for every push. The payload contains a list of commits whose metadata contain the list of added, modified, and deleted files.
+Watchdog4Git receives GitHub [webhook](https://developer.github.com/webhooks/) events for every push.
+The payload contains a list of commits whose metadata contain the list of added, modified, and deleted files.
 
-Before examining the pushed commits, Watch4Dog downloads and parses the `.gitattributes` file from the default branch to learn what files are currently tracked by Git LFS. For each added or modified file in each commit, the bot [queries the file size](https://developer.github.com/v3/repos/contents/) and checks:
-- If the file matches the Git LFS path pattern but has no valid Git LFS pointer content, then the file is marked as a *misconfiguration*.
-- If the file does not match a Git LFS path pattern but is larger than the defined threshold, then the file is marked as a *suggestion*.
-Finally, all misconfigurations and suggestions are rolled up in a single commit comment.
+For each added or modified file in each commit, the App [queries the file size](https://developer.github.com/v3/repos/contents/) and checks if the file does not match a Git LFS path pattern but is larger than the defined threshold. It then marks the file as a *suggestion*.
+All suggestions are rolled up in a single commit comment and posted to the commit on GitHub.
 
 ### Contributors
 
